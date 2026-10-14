@@ -26,6 +26,7 @@
   <div class="card">
     <div id="det">Camera not started</div>
     <div>Motor command: <span id="cmd" class="STOP">STOP</span></div>
+    <div id="dbg" style="font-size:13px;opacity:.7;min-height:1.2em"></div>
     <div id="note"></div>
   </div>
 
@@ -44,6 +45,8 @@
     const BAD_STOP_AFTER = 3;    // consecutive unknown/error frames -> STOP (latched)
     const ARM_AWAKE_NEEDED = 3;  // consecutive awake frames before Arm is allowed
     const FETCH_TIMEOUT_MS = 12000;
+    const FRAME_WIDTH = 640;     // bigger frames help on phone cameras
+    const JPEG_QUALITY = 0.8;
 
     // ---- State ----
     const video = document.getElementById("camera");
@@ -52,6 +55,7 @@
     const detEl = document.getElementById("det");
     const cmdEl = document.getElementById("cmd");
     const noteEl = document.getElementById("note");
+    const dbgEl = document.getElementById("dbg");
     const armBtn = document.getElementById("arm");
 
     let stream = null, monitoring = false, busy = false, loopTimer = null;
@@ -126,11 +130,11 @@
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
       try {
-        canvas.width = 320;
-        canvas.height = Math.round(320 * video.videoHeight / video.videoWidth);
+        canvas.width = FRAME_WIDTH;
+        canvas.height = Math.round(FRAME_WIDTH * video.videoHeight / video.videoWidth);
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.65));
+        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", JPEG_QUALITY));
         if (!blob) throw new Error("Frame capture failed");
 
         const form = new FormData();
@@ -148,6 +152,8 @@
         if (!monitoring) return;  // Stop pressed while request was in flight
         const conf = result.best ? " (" + Math.round(result.best.confidence * 100) + "%)" : "";
         detEl.textContent = result.state + conf;
+        dbgEl.textContent = (result.top || [])
+          .map(x => x.class + " " + Math.round(x.confidence * 100) + "%").join(", ");
         handleState(result.state);
       } catch (e) {
         if (!monitoring) return;
@@ -168,7 +174,7 @@
       if (monitoring) return;  // prevents a second loop
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" }, audio: false
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
         });
         video.srcObject = stream;
         await video.play();
