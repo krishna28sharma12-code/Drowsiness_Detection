@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Drowsiness Demo</title>
+  <style>
+    :root { --bg:#fff; --fg:#111; --card:#f2f2f2; --ok:#1b8a3a; --warn:#c77700; --bad:#c62828; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#121212; --fg:#eee; --card:#222; } }
+    body { font-family: Arial, sans-serif; background:var(--bg); color:var(--fg);
+           max-width:600px; margin:0 auto; padding:16px; text-align:center; }
+    video { width:100%; border-radius:12px; background:#222; }
+    .card { background:var(--card); border-radius:12px; padding:12px; margin:12px 0; }
+    #det { font-size:22px; font-weight:bold; }
+    #cmd { font-size:28px; font-weight:bold; }
+    #note { font-size:14px; opacity:.8; min-height:1.2em; }
+    button { padding:12px 18px; margin:6px; font-size:16px; border-radius:8px; border:0; }
+    button:disabled { opacity:.4; }
+    .RUN { color:var(--ok); } .SLOW { color:var(--warn); } .STOP { color:var(--bad); }
+  </style>
+</head>
+<body>
+  <h2>Drowsiness Detection</h2>
+  <video id="camera" autoplay playsinline muted></video>
+
+  <div class="card">
+    <div id="det">Camera not started</div>
+    <div>Motor command: <span id="cmd" class="STOP">STOP</span></div>
+    <div id="note"></div>
+  </div>
+
+  <button id="start">Start camera</button>
+  <button id="arm" disabled>Arm motor</button>
+  <button id="stop">Stop</button>
+  <canvas id="canvas" hidden></canvas>
+
+  <script>
+    // ---- Config ----
+    const TOKEN = new URLSearchParams(location.search).get("token") || "";
+    const FRAME_MS = 1000;       // time between frames
+    const HEARTBEAT_MS = 500;    // re-send current command (Arduino times out at 1500 ms)
+    const SLOW_AFTER = 2;        // consecutive drowsy frames -> SLOW
+    const STOP_AFTER = 3;        // consecutive drowsy frames -> STOP (latched)
+    const BAD_STOP_AFTER = 3;    // consecutive unknown/error frames -> STOP (latched)
+    const ARM_AWAKE_NEEDED = 3;  // consecutive awake frames before Arm is allowed
+    const FETCH_TIMEOUT_MS = 12000;
+
+    // ---- State ----
+    const video = document.getElementById("camera");
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const detEl = document.getElementById("det");
+    const cmdEl = document.getElementById("cmd");
+    const noteEl = document.getElementById("note");
+    const armBtn = document.getElementById("arm");
+
+    let stream = null, monitoring = false, busy = false, loopTimer = null;
+    let cmd = "STOP";      // RUN | SLOW | STOP
+    let latched = true;    // true = motor locked until user presses Arm
+    let drowsyStreak = 0, badStreak = 0, awakeStreak = 0;
+    let note = "Press Start camera";
+
+    function hasBridge() { return !!window.AndroidBluetooth; }
+    function btConnected() {
+      try { return hasBridge() && window.AndroidBluetooth.isConnected(); }
+      catch (e) { return false; }
+    }
+
+    function render(det) {
+      if (det) detEl.textContent = det;
+      cmdEl.textContent = cmd;
+      cmdEl.className = cmd;
+      noteEl.textContent = note;
+      armBtn.disabled = !(monitoring && latched && awakeStreak >= ARM_AWAKE_NEEDED &&
+                          (!hasBridge() || btConnected()));
+    }
+
+    function latch(reason) {
+      cmd = "STOP";
+      latched = true;
+      awakeStreak = 0;
+      note = "Stopped: " + reason + ". Wait for awake frames, then press Arm.";
+      render();
+      transmit();
+    }
+
+    function transmit() {
+      if (!hasBridge()) { return; }  // plain browser testing: nothing to send to
+      if (!btConnected()) {
+        if (!latched) latch("Bluetooth disconnected");
+        return;
+      }
+      try { window.AndroidBluetooth.send(cmd); } catch (e) { /* ignore */ }
+    }
+
+    // Heartbeat: always re-sends the current command (no dedup).
+    setInterval(transmit, HEARTBEAT_MS);
+
+    function handleState(state) {
+      if (state === "AWAKE") {
+        badStreak = 0; drowsyStreak = 0; awakeStreak++;
+        if (!latched && cmd === "SLOW") { cmd = "RUN"; note = "Recovered"; }
+      } else if (state === "DROWSY") {
+        badStreak = 0; awakeStreak = 0; drowsyStreak++;
+        if (!latched) {
+          if (drowsyStreak >= STOP_AFTER) { latch("drowsiness sustained"); return; }
+          if (drowsyStreak >= SLOW_AFTER) { cmd = "SLOW"; note = "Drowsy: slowing"; }
+        }
+      } else { // UNKNOWN (no face / low confidence)
+        awakeStreak = 0; badStreak++;
+        if (!latched && badStreak >= BAD_STOP_AFTER) { latch("no face / low confidence"); return; }
+      }
+      render();
+    }
+
+    function handleError(message) {
+      awakeStreak = 0; badStreak++;
+      detEl.textContent = "Error: " + message;
+      if (!latched && badStreak >= BAD_STOP_AFTER) { latch("inference errors"); return; }
+      render();
+    }
+
+    async function sendFrame() {
+      if (!monitoring || busy || video.readyState < 2 || !video.videoWidth) return;
+      busy = true;
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+      try {
+        canvas.width = 320;
+        canvas.height = Math.round(320 * video.videoHeight / video.videoWidth);
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", 0.65));
+        if (!blob) throw new Error("Frame capture failed");
+
+        const form = new FormData();
+        form.append("frame", blob, "frame.jpg");
+
+        const resp = await fetch("/api/detect", {
+          method: "POST",
+          body: form,
+          headers: { "x-demo-token": TOKEN },
+          signal: ctrl.signal
+        });
+        const result = await resp.json();
+        if (!resp.ok) throw new Error(result.error || ("HTTP " + resp.status));
+
+        if (!monitoring) return;  // Stop pressed while request was in flight
+        const conf = result.best ? " (" + Math.round(result.best.confidence * 100) + "%)" : "";
+        detEl.textContent = result.state + conf;
+        handleState(result.state);
+      } catch (e) {
+        if (!monitoring) return;
+        handleError(e.name === "AbortError" ? "timeout" : e.message);
+      } finally {
+        clearTimeout(timer);
+        busy = false;
+      }
+    }
+
+    async function loop() {
+      if (!monitoring) return;
+      await sendFrame();
+      if (monitoring) loopTimer = setTimeout(loop, FRAME_MS);
+    }
+
+    document.getElementById("start").onclick = async () => {
+      if (monitoring) return;  // prevents a second loop
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" }, audio: false
+        });
+        video.srcObject = stream;
+        await video.play();
+        monitoring = true;
+        drowsyStreak = badStreak = awakeStreak = 0;
+        note = "Monitoring. Motor stays off until you press Arm.";
+        render("Monitoring");
+        loop();
+      } catch (e) {
+        detEl.textContent = "Camera error: " + e.message;
+      }
+    };
+
+    armBtn.onclick = () => {
+      if (!monitoring || !latched || awakeStreak < ARM_AWAKE_NEEDED) return;
+      latched = false;
+      drowsyStreak = badStreak = 0;
+      cmd = "RUN";
+      note = "Armed";
+      render();
+      transmit();
+    };
+
+    document.getElementById("stop").onclick = () => {
+      monitoring = false;
+      clearTimeout(loopTimer);
+      if (stream) stream.getTracks().forEach(t => t.stop());
+      stream = null;
+      video.srcObject = null;
+      latch("stopped by user");
+      detEl.textContent = "Monitoring stopped";
+    };
+
+    // If the page goes to the background, the camera/timers may stall: stop the motor.
+    document.addEventListener("visibilitychange", () => {
+      if (document.hidden && !latched) latch("page hidden");
+    });
+
+    render();
+  </script>
+</body>
+</html>
