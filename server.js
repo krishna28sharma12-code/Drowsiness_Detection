@@ -12,6 +12,7 @@ const {
   ROBOFLOW_MODEL_ID,
   DEMO_TOKEN,
   MIN_CONFIDENCE = "0.5",
+  DROWSY_MIN_CONFIDENCE = "0.7",
   DROWSY_CLASSES = "drowsy,fatigue",
   AWAKE_CLASSES = "awake",
   DEBUG_RAW = "0",
@@ -22,7 +23,8 @@ const toSet = (s) =>
   new Set(s.split(",").map((x) => x.trim().toLowerCase()).filter(Boolean));
 const drowsySet = toSet(DROWSY_CLASSES);
 const awakeSet = toSet(AWAKE_CLASSES);
-const minConf = Number(MIN_CONFIDENCE) || 0.5;
+const minConf = Number(MIN_CONFIDENCE) || 0.5;          // awake needs at least this
+const drowsyMinConf = Number(DROWSY_MIN_CONFIDENCE) || 0.7; // drowsy needs more proof
 
 for (const [k, v] of Object.entries({ ROBOFLOW_API_KEY, ROBOFLOW_MODEL_ID, DEMO_TOKEN })) {
   if (!v) console.warn(`WARNING: ${k} is not set`);
@@ -75,12 +77,15 @@ function extractPredictions(data) {
 }
 
 function classify(preds) {
-  const strong = preds.filter((x) => x.conf >= minConf);
-  if (strong.length === 0) return { state: "UNKNOWN", best: null };
-  const best = strong.reduce((a, b) => (b.conf > a.conf ? b : a));
-  if (drowsySet.has(best.cls)) return { state: "DROWSY", best };
-  if (awakeSet.has(best.cls)) return { state: "AWAKE", best };
-  return { state: "UNKNOWN", best };
+  const topAll = preds.slice().sort((a, b) => b.conf - a.conf);
+  const valid = preds.filter((x) =>
+    awakeSet.has(x.cls) ? x.conf >= minConf
+    : drowsySet.has(x.cls) ? x.conf >= drowsyMinConf
+    : false
+  );
+  if (valid.length === 0) return { state: "UNKNOWN", best: topAll[0] || null };
+  const best = valid.reduce((a, b) => (b.conf > a.conf ? b : a));
+  return { state: drowsySet.has(best.cls) ? "DROWSY" : "AWAKE", best };
 }
 
 app.post("/api/detect", limiter, (req, res, next) => {
@@ -116,6 +121,11 @@ app.post("/api/detect", limiter, (req, res, next) => {
       state, // AWAKE | DROWSY | UNKNOWN
       best: best ? { class: best.cls, confidence: best.conf } : null,
       count: preds.length,
+      top: preds
+        .slice()
+        .sort((a, b) => b.conf - a.conf)
+        .slice(0, 3)
+        .map((x) => ({ class: x.cls, confidence: x.conf })),
     });
   } catch (error) {
     console.error("Inference error:", error.response?.status, error.response?.data || error.message);
