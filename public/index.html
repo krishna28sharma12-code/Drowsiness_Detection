@@ -2,218 +2,477 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Drowsiness Demo</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a0e14">
+  <title>DriveGuard</title>
   <style>
-    :root { --bg:#fff; --fg:#111; --card:#f2f2f2; --ok:#1b8a3a; --warn:#c77700; --bad:#c62828; }
-    @media (prefers-color-scheme: dark) { :root { --bg:#121212; --fg:#eee; --card:#222; } }
-    body { font-family: Arial, sans-serif; background:var(--bg); color:var(--fg);
-           max-width:600px; margin:0 auto; padding:16px; text-align:center; }
-    video { width:100%; border-radius:12px; background:#222; }
-    .card { background:var(--card); border-radius:12px; padding:12px; margin:12px 0; }
-    #det { font-size:22px; font-weight:bold; }
-    #cmd { font-size:28px; font-weight:bold; }
-    #note { font-size:14px; opacity:.8; min-height:1.2em; }
-    button { padding:12px 18px; margin:6px; font-size:16px; border-radius:8px; border:0; }
-    button:disabled { opacity:.4; }
-    .RUN { color:var(--ok); } .SLOW { color:var(--warn); } .STOP { color:var(--bad); }
+    :root {
+      --bg: #0a0e14;
+      --panel: #111823;
+      --panel-2: #172131;
+      --line: #223047;
+      --text: #e8eef7;
+      --muted: #8a99b0;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --bad: #ef4444;
+      --idle: #64748b;
+      --state: var(--idle);
+    }
+    body[data-mode="ok"]   { --state: var(--ok); }
+    body[data-mode="warn"] { --state: var(--warn); }
+    body[data-mode="bad"]  { --state: var(--bad); }
+    body[data-mode="idle"] { --state: var(--idle); }
+
+    * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+    html, body { margin: 0; background: var(--bg); color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+    body {
+      max-width: 520px; margin: 0 auto;
+      padding: calc(env(safe-area-inset-top, 0px) + 14px) 16px calc(env(safe-area-inset-bottom, 0px) + 18px);
+    }
+
+    header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .brand { display: flex; align-items: center; gap: 10px; }
+    .logo { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center;
+      background: linear-gradient(135deg, #1d4ed8, #38bdf8); }
+    .logo svg { width: 20px; height: 20px; }
+    .brand h1 { font-size: 18px; margin: 0; letter-spacing: .3px; }
+    .brand small { display: block; font-size: 11px; color: var(--muted); margin-top: 1px; }
+    .pill { display: flex; align-items: center; gap: 7px; font-size: 12px; padding: 7px 11px;
+      border-radius: 999px; background: var(--panel); border: 1px solid var(--line); color: var(--muted); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--idle); }
+    .pill.ok .dot { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+    .pill.ok { color: var(--text); }
+    .pill.bad .dot { background: var(--bad); }
+
+    .cam { position: relative; aspect-ratio: 4 / 3; border-radius: 22px; overflow: hidden;
+      background: #05080d; border: 2px solid var(--line); transition: border-color .3s, box-shadow .3s; }
+    .cam.live { border-color: var(--state); box-shadow: 0 0 0 1px var(--state), 0 0 28px -6px var(--state); }
+    video { width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); display: block; }
+    .placeholder { position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 10px; color: var(--muted); font-size: 14px;
+      background: radial-gradient(circle at 50% 40%, #121b29, #05080d 70%); }
+    .placeholder svg { width: 46px; height: 46px; opacity: .6; }
+    .cam.live .placeholder { display: none; }
+    .guide { position: absolute; inset: 0; display: none; place-items: center; pointer-events: none; }
+    .cam.live .guide { display: grid; }
+    .guide svg { width: 52%; height: 86%; opacity: .35; }
+    .badge { position: absolute; top: 12px; left: 12px; display: none; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 700; letter-spacing: 1px; padding: 5px 9px; border-radius: 8px;
+      background: rgba(0,0,0,.55); backdrop-filter: blur(4px); }
+    .cam.live .badge { display: flex; }
+    .badge i { width: 7px; height: 7px; border-radius: 50%; background: var(--bad); animation: blink 1.2s infinite; }
+    @keyframes blink { 50% { opacity: .25; } }
+
+    .panel { margin-top: 14px; padding: 16px; border-radius: 22px; background: var(--panel);
+      border: 1px solid var(--line); text-align: center; }
+    .status-title { font-size: 24px; font-weight: 800; color: var(--state); transition: color .3s; }
+    .status-sub { margin-top: 4px; font-size: 14px; color: var(--muted); min-height: 1.3em; }
+    .gauge { width: 100%; max-width: 260px; margin: 10px auto 0; display: block; }
+    .g-bg, .g-fill { fill: none; stroke-width: 14; stroke-linecap: round; }
+    .g-bg { stroke: var(--panel-2); }
+    .g-fill { stroke: var(--state); stroke-dasharray: 251.33; stroke-dashoffset: 251.33;
+      transition: stroke-dashoffset .6s ease, stroke .3s; }
+    .g-label { fill: var(--text); font-size: 15px; font-weight: 700; text-anchor: middle; letter-spacing: 1.5px; }
+    .g-cap { fill: var(--muted); font-size: 9px; text-anchor: middle; letter-spacing: 2px; }
+    #dbg { display: none; margin-top: 8px; font-size: 12px; color: var(--muted); word-break: break-word; }
+    body.debug #dbg { display: block; }
+
+    .actions { display: grid; grid-template-columns: 1.4fr 1fr; gap: 12px; margin-top: 14px; }
+    button { height: 60px; border: 0; border-radius: 18px; font-size: 18px; font-weight: 800;
+      letter-spacing: .4px; color: #fff; display: flex; align-items: center; justify-content: center;
+      gap: 10px; cursor: pointer; transition: transform .08s, opacity .2s; }
+    button:active:not(:disabled) { transform: scale(.97); }
+    button:disabled { opacity: .35; cursor: default; }
+    #start { background: linear-gradient(135deg, #16a34a, #22c55e); box-shadow: 0 8px 22px -10px #22c55e; }
+    #stop  { background: linear-gradient(135deg, #b91c1c, #ef4444); box-shadow: 0 8px 22px -10px #ef4444; }
+    button svg { width: 18px; height: 18px; fill: currentColor; }
+    .foot { margin-top: 14px; text-align: center; font-size: 11px; color: var(--muted); opacity: .7; }
   </style>
 </head>
-<body>
-  <h2>Drowsiness Detection</h2>
-  <video id="camera" autoplay playsinline muted></video>
+<body data-mode="idle">
+  <header>
+    <div class="brand">
+      <div class="logo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div><h1>DriveGuard</h1><small>Driver alertness assistant</small></div>
+    </div>
+    <div class="pill" id="pill"><span class="dot"></span><span id="pillText">Preview</span></div>
+  </header>
 
-  <div class="card">
-    <div id="det">Camera not started</div>
-    <div>Motor command: <span id="cmd" class="STOP">STOP</span></div>
-    <div id="dbg" style="font-size:13px;opacity:.7;min-height:1.2em"></div>
-    <div id="note"></div>
+  <div class="cam" id="cam">
+    <video id="camera" autoplay playsinline muted></video>
+    <div class="placeholder">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 8a2 2 0 0 1 2-2h2l1.5-2h7L17 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8z"/><circle cx="12" cy="12.5" r="3.5"/>
+      </svg>
+      <span>Driver camera is off</span>
+    </div>
+    <div class="guide">
+      <svg viewBox="0 0 100 130" fill="none" stroke="#fff" stroke-width="1.5" stroke-dasharray="5 5">
+        <ellipse cx="50" cy="65" rx="38" ry="52"/>
+      </svg>
+    </div>
+    <div class="badge"><i></i>LIVE</div>
   </div>
 
-  <button id="start">Start camera</button>
-  <button id="arm" disabled>Arm motor</button>
-  <button id="stop">Stop</button>
-  <canvas id="canvas" hidden></canvas>
+  <div class="panel">
+    <div class="status-title" id="title">Getting ready…</div>
+    <div class="status-sub" id="sub">Preparing the driver monitor.</div>
+    <svg class="gauge" viewBox="0 0 200 118">
+      <path class="g-bg" d="M 20 100 A 80 80 0 0 1 180 100"/>
+      <path class="g-fill" id="gFill" d="M 20 100 A 80 80 0 0 1 180 100"/>
+      <text class="g-label" id="gLabel" x="100" y="86">STOPPED</text>
+      <text class="g-cap" x="100" y="106">VEHICLE SPEED</text>
+    </svg>
+    <div id="dbg"></div>
+  </div>
 
-  <script>
-    // ---- Config ----
-    const TOKEN = new URLSearchParams(location.search).get("token") || "";
-    const FRAME_MS = 1000;       // time between frames
-    const HEARTBEAT_MS = 500;    // re-send current command (Arduino times out at 1500 ms)
-    const SLOW_AFTER = 2;        // consecutive drowsy frames -> SLOW
-    const STOP_AFTER = 3;        // consecutive drowsy frames -> STOP (latched)
-    const BAD_STOP_AFTER = 3;    // consecutive unknown/error frames -> STOP (latched)
-    const ARM_AWAKE_NEEDED = 3;  // consecutive awake frames before Arm is allowed
-    const FETCH_TIMEOUT_MS = 12000;
-    const FRAME_WIDTH = 640;     // bigger frames help on phone cameras
-    const JPEG_QUALITY = 0.8;
+  <div class="actions">
+    <button id="start" disabled><svg viewBox="0 0 24 24"><path d="M7 4l13 8-13 8z"/></svg><span id="startText">Start</span></button>
+    <button id="stop" disabled><svg viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/></svg>Stop</button>
+  </div>
+  <div class="foot">DriveGuard keeps watch so you can keep your eyes on the road.</div>
 
-    // ---- State ----
-    const video = document.getElementById("camera");
-    const canvas = document.getElementById("canvas");
-    const ctx = canvas.getContext("2d");
-    const detEl = document.getElementById("det");
-    const cmdEl = document.getElementById("cmd");
-    const noteEl = document.getElementById("note");
-    const dbgEl = document.getElementById("dbg");
-    const armBtn = document.getElementById("arm");
+  <script type="module">
+    // =====================================================================
+    //  Settings (you can also override with the link, e.g. ?slow=700&stop=1800)
+    // =====================================================================
+    const MP_VERSION = "0.10.21";
+    const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@" + MP_VERSION;
+    const MODEL_URL = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task";
 
-    let stream = null, monitoring = false, busy = false, loopTimer = null;
-    let cmd = "STOP";      // RUN | SLOW | STOP
-    let latched = true;    // true = motor locked until user presses Arm
-    let drowsyStreak = 0, badStreak = 0, awakeStreak = 0;
-    let note = "Press Start camera";
+    const qs = new URLSearchParams(location.search);
+    const num = (key, fallback) => { const v = Number(qs.get(key)); return v > 0 ? v : fallback; };
+    const DEBUG = qs.get("debug") === "1";
+    if (DEBUG) document.body.classList.add("debug");
 
-    function hasBridge() { return !!window.AndroidBluetooth; }
+    const CONFIG = {
+      slowMs: num("slow", 800),         // eyes closed this long -> slow down
+      stopMs: num("stop", 2000),        // eyes closed this long -> stop the vehicle
+      noFaceSlowMs: 1000,               // driver not visible this long -> slow down
+      noFaceStopMs: 3000,               // driver not visible this long -> stop
+      graceMs: 300,                     // eyes must stay open this long to count as reopened
+      calibMs: 1500,                    // time spent getting to know the driver at the start
+      fixedLimit: num("limit", 0)       // 0 = automatic closed-eye limit
+    };
+    const HEARTBEAT_MS = 500;           // keeps the vehicle link alive
+    const WATCHDOG_MS = 3000;           // no driver checks for this long -> stop
+    const MIN_INTERVAL_MS = 60;         // time between checks (about 16 per second)
+    const GAUGE_LEN = 251.33;
+
+    // @@ENGINE-START
+    // Decides what the vehicle should do, one camera check at a time.
+    // eye = null (no face) or { value: 0..1 } where 1 means fully closed.
+    // Returns null (nothing to change) or { cmd, mode, title, sub }.
+    function createEngine(cfg) {
+      const s = {
+        calibrated: false, calibStart: null, samples: [], limit: cfg.fixedLimit || 0.5,
+        isClosed: false, closedSince: null, lastClosedSeen: 0, noFaceSince: null
+      };
+
+      function resetTracking() {
+        s.isClosed = false; s.closedSince = null; s.lastClosedSeen = 0; s.noFaceSince = null;
+      }
+      function recalibrate() {
+        s.calibrated = false; s.calibStart = null; s.samples = [];
+        resetTracking();
+      }
+      function finishCalibration() {
+        const sorted = s.samples.slice().sort((a, b) => a - b);
+        // low-end sample, so blinks during calibration don't distort it
+        let base = sorted[Math.floor(sorted.length * 0.3)] || 0.1;
+        base = Math.min(base, 0.35);
+        s.limit = cfg.fixedLimit || Math.min(0.65, Math.max(0.42, base + 0.30));
+        s.calibrated = true;
+      }
+
+      function step(eye, now) {
+        // Driver not visible
+        if (!eye) {
+          if (s.noFaceSince === null) s.noFaceSince = now;
+          const gone = now - s.noFaceSince;
+          if (gone >= cfg.noFaceStopMs) {
+            return { cmd: "STOP", mode: "bad", title: "Vehicle stopped",
+                     sub: "We can't see the driver. Face the camera, then press Start again." };
+          }
+          if (gone >= cfg.noFaceSlowMs) {
+            return { cmd: "SLOW", mode: "warn", title: "Can't see the driver",
+                     sub: "Slowing down. Please face the camera." };
+          }
+          return null;
+        }
+        s.noFaceSince = null;
+
+        // Getting to know the driver (first moments of a trip)
+        if (!s.calibrated) {
+          if (s.calibStart === null) s.calibStart = now;
+          s.samples.push(eye.value);
+          if (now - s.calibStart >= cfg.calibMs && s.samples.length >= 8) {
+            finishCalibration();
+            return { cmd: "RUN", mode: "ok", title: "Driver alert", sub: "Eyes on the road. All good." };
+          }
+          return { cmd: null, mode: "ok", title: "Getting to know you",
+                   sub: "Look straight ahead for a moment." };
+        }
+
+        // Eyes open or closed (with a little hysteresis so it doesn't flicker)
+        const closed = eye.value >= s.limit - (s.isClosed ? 0.08 : 0);
+        s.isClosed = closed;
+        if (closed) {
+          if (s.closedSince === null) s.closedSince = now;
+          s.lastClosedSeen = now;
+        } else if (s.closedSince !== null && now - s.lastClosedSeen > cfg.graceMs) {
+          s.closedSince = null;   // eyes have really reopened
+        }
+        const closedMs = s.closedSince === null ? 0 : s.lastClosedSeen - s.closedSince;
+
+        if (closedMs >= cfg.stopMs) {
+          return { cmd: "STOP", mode: "bad", title: "Vehicle stopped",
+                   sub: "Drowsiness detected. Take a break, then press Start again." };
+        }
+        if (closedMs >= cfg.slowMs) {
+          return { cmd: "SLOW", mode: "warn", title: "Drowsiness detected",
+                   sub: "Eyes closing. Slowing the vehicle down." };
+        }
+        return { cmd: "RUN", mode: "ok", title: "Driver alert", sub: "Eyes on the road. All good." };
+      }
+
+      return { step, resetTracking, recalibrate, state: s };
+    }
+    // @@ENGINE-END
+
+    // =====================================================================
+    //  Screen
+    // =====================================================================
+    const $ = (id) => document.getElementById(id);
+    const video = $("camera"), cam = $("cam"), titleEl = $("title"), subEl = $("sub"), dbgEl = $("dbg");
+    const startBtn = $("start"), stopBtn = $("stop"), startText = $("startText");
+    const pill = $("pill"), pillText = $("pillText");
+    const gFill = $("gFill"), gLabel = $("gLabel");
+
+    let ready = false;        // driver monitor loaded
+    let landmarker = null;
+    let stream = null, monitoring = false;
+    let cmd = "STOP";         // RUN | SLOW | STOP (sent to the vehicle)
+    let halted = false;       // true after DriveGuard stopped the vehicle by itself
+    let ui = { mode: "idle", title: "Getting ready…", sub: "Preparing the driver monitor." };
+    let lastKey = "";
+    let rafId = 0, lastVideoTime = -1, lastRun = 0, lastResultAt = 0;
+
+    const engine = createEngine(CONFIG);
+
+    const hasBridge = () => !!window.AndroidBluetooth;
     function btConnected() {
       try { return hasBridge() && window.AndroidBluetooth.isConnected(); }
       catch (e) { return false; }
     }
 
-    function render(det) {
-      if (det) detEl.textContent = det;
-      cmdEl.textContent = cmd;
-      cmdEl.className = cmd;
-      noteEl.textContent = note;
-      armBtn.disabled = !(monitoring && latched && awakeStreak >= ARM_AWAKE_NEEDED &&
-                          (!hasBridge() || btConnected()));
+    function setUI(mode, title, sub) { ui = { mode, title, sub }; render(); }
+
+    function render() {
+      const key = [ui.mode, ui.title, ui.sub, cmd, monitoring, halted, ready].join("|");
+      if (key === lastKey) return;
+      lastKey = key;
+
+      document.body.dataset.mode = ui.mode;
+      titleEl.textContent = ui.title;
+      subEl.textContent = ui.sub;
+
+      const level = cmd === "RUN" ? 1 : cmd === "SLOW" ? 0.35 : 0;
+      gFill.style.strokeDashoffset = String(GAUGE_LEN * (1 - level));
+      gLabel.textContent = cmd === "RUN" ? "CRUISING" : cmd === "SLOW" ? "SLOW" : "STOPPED";
+
+      cam.classList.toggle("live", monitoring);
+      startBtn.disabled = !ready || (monitoring && !halted);
+      stopBtn.disabled = !monitoring;
+      startText.textContent = halted ? "Start again" : "Start";
+      renderPill();
     }
 
-    function latch(reason) {
+    function renderPill() {
+      pill.className = "pill";
+      if (!hasBridge()) { pillText.textContent = "Preview mode"; return; }
+      if (btConnected()) { pill.classList.add("ok"); pillText.textContent = "Vehicle connected"; }
+      else { pill.classList.add("bad"); pillText.textContent = "Vehicle not connected"; }
+    }
+
+    // Stops the vehicle by itself and explains why.
+    function halt(title, sub) {
       cmd = "STOP";
-      latched = true;
-      awakeStreak = 0;
-      note = "Stopped: " + reason + ". Wait for awake frames, then press Arm.";
-      render();
+      halted = true;
+      setUI("bad", title, sub);
       transmit();
     }
 
     function transmit() {
-      if (!hasBridge()) { return; }  // plain browser testing: nothing to send to
+      if (!hasBridge()) return;  // browser preview: no vehicle attached
       if (!btConnected()) {
-        if (!latched) latch("Bluetooth disconnected");
+        if (monitoring && !halted) {
+          halt("Vehicle stopped", "Lost the link to the vehicle. Reconnect, then press Start again.");
+        }
         return;
       }
       try { window.AndroidBluetooth.send(cmd); } catch (e) { /* ignore */ }
     }
 
-    // Heartbeat: always re-sends the current command (no dedup).
-    setInterval(transmit, HEARTBEAT_MS);
+    // Keeps the vehicle link alive (the vehicle stops by itself if this ever goes quiet),
+    // and stops the vehicle if the driver checks themselves stall.
+    setInterval(() => {
+      if (monitoring && !halted && performance.now() - lastResultAt > WATCHDOG_MS) {
+        halt("Vehicle stopped", "Driver monitor stopped responding. Press Start again.");
+        return;
+      }
+      transmit();
+      renderPill();
+    }, HEARTBEAT_MS);
 
-    function handleState(state) {
-      if (state === "AWAKE") {
-        badStreak = 0; drowsyStreak = 0; awakeStreak++;
-        if (!latched && cmd === "SLOW") { cmd = "RUN"; note = "Recovered"; }
-      } else if (state === "DROWSY") {
-        badStreak = 0; awakeStreak = 0; drowsyStreak++;
-        if (!latched) {
-          if (drowsyStreak >= STOP_AFTER) { latch("drowsiness sustained"); return; }
-          if (drowsyStreak >= SLOW_AFTER) { cmd = "SLOW"; note = "Drowsy: slowing"; }
+    // =====================================================================
+    //  Reading the driver's eyes
+    // =====================================================================
+    function readEyes(res, vw, vh) {
+      const lm = res.faceLandmarks && res.faceLandmarks[0];
+      if (!lm) return null;
+
+      const cats = res.faceBlendshapes && res.faceBlendshapes[0] && res.faceBlendshapes[0].categories;
+      if (cats && cats.length) {
+        let l = null, r = null;
+        for (const c of cats) {
+          const n = String(c.categoryName).toLowerCase();
+          if (n === "eyeblinkleft") l = c.score;
+          else if (n === "eyeblinkright") r = c.score;
         }
-      } else { // UNKNOWN (no face / low confidence)
-        awakeStreak = 0; badStreak++;
-        if (!latched && badStreak >= BAD_STOP_AFTER) { latch("no face / low confidence"); return; }
+        if (l !== null && r !== null) return { value: (l + r) / 2, src: "blendshape" };
       }
-      render();
+
+      // Backup: measure the eye opening from the face points.
+      const d = (a, b) => Math.hypot((lm[a].x - lm[b].x) * vw, (lm[a].y - lm[b].y) * vh);
+      const ear = (p) => (d(p[1], p[5]) + d(p[2], p[4])) / (2 * d(p[0], p[3]));
+      const e = (ear([33, 160, 158, 133, 153, 144]) + ear([362, 385, 387, 263, 373, 380])) / 2;
+      return { value: Math.min(1, Math.max(0, (0.30 - e) / 0.18)), src: "landmarks" };
     }
 
-    function handleError(message) {
-      awakeStreak = 0; badStreak++;
-      detEl.textContent = "Error: " + message;
-      if (!latched && badStreak >= BAD_STOP_AFTER) { latch("inference errors"); return; }
-      render();
-    }
+    function onFrame(res, now) {
+      lastResultAt = now;
+      const eye = readEyes(res, video.videoWidth, video.videoHeight);
+      const out = engine.step(eye, now);
 
-    async function sendFrame() {
-      if (!monitoring || busy || video.readyState < 2 || !video.videoWidth) return;
-      busy = true;
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-      try {
-        canvas.width = FRAME_WIDTH;
-        canvas.height = Math.round(FRAME_WIDTH * video.videoHeight / video.videoWidth);
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-
-        const blob = await new Promise(r => canvas.toBlob(r, "image/jpeg", JPEG_QUALITY));
-        if (!blob) throw new Error("Frame capture failed");
-
-        const form = new FormData();
-        form.append("frame", blob, "frame.jpg");
-
-        const resp = await fetch("/api/detect", {
-          method: "POST",
-          body: form,
-          headers: { "x-demo-token": TOKEN },
-          signal: ctrl.signal
-        });
-        const result = await resp.json();
-        if (!resp.ok) throw new Error(result.error || ("HTTP " + resp.status));
-
-        if (!monitoring) return;  // Stop pressed while request was in flight
-        const conf = result.best ? " (" + Math.round(result.best.confidence * 100) + "%)" : "";
-        detEl.textContent = result.state + conf;
-        dbgEl.textContent = (result.top || [])
-          .map(x => x.class + " " + Math.round(x.confidence * 100) + "%").join(", ");
-        handleState(result.state);
-      } catch (e) {
-        if (!monitoring) return;
-        handleError(e.name === "AbortError" ? "timeout" : e.message);
-      } finally {
-        clearTimeout(timer);
-        busy = false;
+      if (DEBUG) {
+        const st = engine.state;
+        dbgEl.textContent = eye
+          ? "eyes " + eye.value.toFixed(2) + " (" + eye.src + ") | limit " + st.limit.toFixed(2) +
+            " | closed " + (st.closedSince === null ? 0 : Math.round(st.lastClosedSeen - st.closedSince)) + " ms" +
+            (st.calibrated ? "" : " | calibrating")
+          : "no face";
       }
+      if (!out) return;
+
+      if (out.cmd === "STOP") { halt(out.title, out.sub); return; }
+      if (out.cmd) cmd = out.cmd;
+      setUI(out.mode, out.title, out.sub);
     }
 
-    async function loop() {
+    function tick() {
       if (!monitoring) return;
-      await sendFrame();
-      if (monitoring) loopTimer = setTimeout(loop, FRAME_MS);
+      const now = performance.now();
+      if (!halted && landmarker && video.readyState >= 2 && video.videoWidth &&
+          video.currentTime !== lastVideoTime && now - lastRun >= MIN_INTERVAL_MS) {
+        lastVideoTime = video.currentTime;
+        lastRun = now;
+        try {
+          onFrame(landmarker.detectForVideo(video, now), now);
+        } catch (e) {
+          if (DEBUG) dbgEl.textContent = "error: " + e.message;  // the watchdog stops the vehicle if this keeps up
+        }
+      }
+      rafId = requestAnimationFrame(tick);
     }
 
-    document.getElementById("start").onclick = async () => {
-      if (monitoring) return;  // prevents a second loop
+    // =====================================================================
+    //  Loading the driver monitor
+    // =====================================================================
+    async function loadMonitor() {
+      try {
+        const vision = await import(MP_BASE + "/vision_bundle.mjs");
+        const fileset = await vision.FilesetResolver.forVisionTasks(MP_BASE + "/wasm");
+        landmarker = await vision.FaceLandmarker.createFromOptions(fileset, {
+          baseOptions: { modelAssetPath: MODEL_URL, delegate: "CPU" },
+          runningMode: "VIDEO",
+          numFaces: 1,
+          outputFaceBlendshapes: true
+        });
+        ready = true;
+        setUI("idle", "Ready to drive", "Press Start to begin your trip.");
+      } catch (e) {
+        setUI("warn", "Driver monitor unavailable", "Check your internet connection and reopen the app.");
+        if (DEBUG) dbgEl.textContent = "load error: " + (e && e.message ? e.message : e);
+      }
+    }
+
+    // =====================================================================
+    //  Buttons
+    // =====================================================================
+    startBtn.onclick = async () => {
+      if (!ready || (monitoring && !halted)) return;
+
+      if (hasBridge() && !btConnected()) {
+        setUI("warn", "Vehicle not connected", "Switch the vehicle on, then try again.");
+        return;
+      }
+
+      engine.resetTracking();
+
+      // Start again after an automatic stop: the camera is already on.
+      if (monitoring && halted) {
+        halted = false; cmd = "RUN";
+        lastResultAt = performance.now();
+        setUI("ok", "Driver alert", "Drive safe. DriveGuard is watching with you.");
+        transmit();
+        return;
+      }
+
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false
+          video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+          audio: false
         });
         video.srcObject = stream;
         await video.play();
-        monitoring = true;
-        drowsyStreak = badStreak = awakeStreak = 0;
-        note = "Monitoring. Motor stays off until you press Arm.";
-        render("Monitoring");
-        loop();
+
+        engine.recalibrate();
+        monitoring = true; halted = false; cmd = "RUN";
+        lastResultAt = performance.now(); lastVideoTime = -1;
+        setUI("ok", "Getting to know you", "Look straight ahead for a moment.");
+        transmit();
+        tick();
       } catch (e) {
-        detEl.textContent = "Camera error: " + e.message;
+        setUI("warn", "Camera unavailable", "Allow camera access, then press Start.");
       }
     };
 
-    armBtn.onclick = () => {
-      if (!monitoring || !latched || awakeStreak < ARM_AWAKE_NEEDED) return;
-      latched = false;
-      drowsyStreak = badStreak = 0;
-      cmd = "RUN";
-      note = "Armed";
-      render();
+    stopBtn.onclick = () => {
+      monitoring = false; halted = false; cmd = "STOP";
+      cancelAnimationFrame(rafId);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+      stream = null;
+      video.srcObject = null;
+      setUI("idle", "Vehicle stopped", "Press Start when you're ready to drive.");
       transmit();
     };
 
-    document.getElementById("stop").onclick = () => {
-      monitoring = false;
-      clearTimeout(loopTimer);
-      if (stream) stream.getTracks().forEach(t => t.stop());
-      stream = null;
-      video.srcObject = null;
-      latch("stopped by user");
-      detEl.textContent = "Monitoring stopped";
-    };
-
-    // If the page goes to the background, the camera/timers may stall: stop the motor.
+    // If the app goes to the background, stop the vehicle.
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && !latched) latch("page hidden");
+      if (document.hidden && monitoring && !halted) {
+        halt("Vehicle stopped", "DriveGuard went to the background. Open it and press Start again.");
+      }
     });
 
     render();
+    loadMonitor();
   </script>
 </body>
 </html>
