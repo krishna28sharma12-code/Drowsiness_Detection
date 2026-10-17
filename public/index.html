@@ -153,7 +153,7 @@
 
     const CONFIG = {
       slowMs: num("slow", 800),         // eyes closed this long -> slow down
-      stopMs: num("stop", 2000),        // eyes closed this long -> stop the vehicle
+      stopMs: num("stop", 3500),        // eyes closed this long -> stop the vehicle
       noFaceSlowMs: 1000,               // driver not visible this long -> slow down
       noFaceStopMs: 3000,               // driver not visible this long -> stop
       graceMs: 300,                     // eyes must stay open this long to count as reopened
@@ -371,7 +371,12 @@
       }
       if (!out) return;
 
+      const checking = !engine.state.calibrated;   // still checking the driver: vehicle waits
       if (out.cmd === "STOP") { halt(out.title, out.sub); return; }
+      if (checking && out.cmd === "SLOW") {
+        setUI("warn", out.title, "Please face the camera to start.");
+        return;
+      }
       if (out.cmd) cmd = out.cmd;
       setUI(out.mode, out.title, out.sub);
     }
@@ -405,6 +410,13 @@
           numFaces: 1,
           outputFaceBlendshapes: true
         });
+        // Warm up once now, so the first real check after Start doesn't freeze the page.
+        try {
+          const c = document.createElement("canvas");
+          c.width = 320; c.height = 240;
+          landmarker.detectForVideo(c, performance.now());
+          landmarker.detectForVideo(c, performance.now() + 1);
+        } catch (e) { /* not critical */ }
         ready = true;
         setUI("idle", "Ready to drive", "Press Start to begin your trip.");
       } catch (e) {
@@ -428,9 +440,15 @@
 
       // Start again after an automatic stop: the camera is already on.
       if (monitoring && halted) {
-        halted = false; cmd = "RUN";
+        halted = false;
         lastResultAt = performance.now();
-        setUI("ok", "Driver alert", "Drive safe. DriveGuard is watching with you.");
+        if (engine.state.calibrated) {
+          cmd = "RUN";
+          setUI("ok", "Driver alert", "Drive safe. DriveGuard is watching with you.");
+        } else {
+          cmd = "STOP";
+          setUI("ok", "Getting to know you", "Look straight ahead. The vehicle starts in a moment.");
+        }
         transmit();
         return;
       }
@@ -444,9 +462,9 @@
         await video.play();
 
         engine.recalibrate();
-        monitoring = true; halted = false; cmd = "RUN";
+        monitoring = true; halted = false; cmd = "STOP";   // the vehicle starts after the driver check
         lastResultAt = performance.now(); lastVideoTime = -1;
-        setUI("ok", "Getting to know you", "Look straight ahead for a moment.");
+        setUI("ok", "Getting to know you", "Look straight ahead. The vehicle starts in a moment.");
         transmit();
         tick();
       } catch (e) {
